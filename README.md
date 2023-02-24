@@ -13,3 +13,10 @@ Low = ~0V
 
 To enable entrance mic, connect pin3(GND) with a resistor(100 ohm) to pin2(Entrance to Home) 
 
+
+# TODO:
+
+- MQTT integration for Home Assistant
+- Web access
+- Secure Link to open the door
+

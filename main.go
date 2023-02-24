@@ -67,6 +67,7 @@ func main() {
 	}
 	gpio := gpiowrapper.NewGPIO()
 	go gpio.WatchInput()
+	go gpio.WatchDoorFeedback()
 
 	phoneNumber := os.Getenv("PHONE_NUMBER")
 	if phoneNumber == "" {
@@ -77,6 +78,7 @@ func main() {
 	go func() {
 		for {
 			<-gpio.CallSignalChan
+			log.Info().Msgf("Signal detected")
 			call.Toggle(phoneNumber)
 		}
 	}()
@@ -84,6 +86,22 @@ func main() {
 		for {
 			resp := <-call.BaresipCli.ResponseChan
 			log.Info().Msgf("%v", resp)
+		}
+	}()
+	go func() {
+		for {
+			<-gpio.DoorReleaseChan
+			if !call.Active {
+				log.Info().Msgf("door unlock without signal calling")
+				continue
+			}
+			// if the release come from this app
+			if gpio.DoorUnlocked {
+				log.Info().Msgf("door unlocked")
+				continue
+			}
+			log.Info().Msgf("door unlocked from physical button, cancelling the call")
+			call.Hangup()
 		}
 	}()
 	go func() {
@@ -100,8 +118,8 @@ func main() {
 				log.Info().Msgf("button %s pressed", event.Param)
 				if event.Param == "5" {
 					go call.BaresipCli.Play("portedoor.wav")
-					go gpio.ReleaseDoor(time.Second * 5)
-					go log.Info().Msgf("door released")
+					go gpio.UnlockDoor(time.Second * 5)
+					go log.Info().Msgf("unlocking door")
 				}
 			}
 			log.Info().Msgf("%v", event)

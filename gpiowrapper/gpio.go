@@ -5,30 +5,39 @@ import (
 	"github.com/stianeikeland/go-rpio/v4"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 )
 
 type GPIO struct {
-	IsPresent      bool
-	CallSignalPin  int
-	DoorReleasePin int
-	GreenLightPin  int
-	RedLightPin    int
-	pinCallSignal  rpio.Pin
-	pinDoorRelease rpio.Pin
-	pinGreenLight  rpio.Pin
-	pingRedLight   rpio.Pin
-	CallSignalChan chan bool
+	IsPresent       bool
+	CallSignalPin   int
+	DoorReleasePin  int
+	DoorFeedbackPin int
+	GreenLightPin   int
+	RedLightPin     int
+	pinCallSignal   rpio.Pin
+	pinDoorRelease  rpio.Pin
+	pinDoorFeedback rpio.Pin
+	pinGreenLight   rpio.Pin
+	pingRedLight    rpio.Pin
+	CallSignalChan  chan bool
+	DoorReleaseChan chan bool
+	doorMutex       *sync.Mutex
+	DoorUnlocked    bool
 }
 
 func NewGPIO() *GPIO {
 	gpio := GPIO{
-		IsPresent:      false,
-		CallSignalPin:  27,
-		DoorReleasePin: 17,
-		GreenLightPin:  23,
-		RedLightPin:    24,
-		CallSignalChan: make(chan bool, 1),
+		IsPresent:       false,
+		CallSignalPin:   27,
+		DoorReleasePin:  17,
+		DoorFeedbackPin: 4,
+		GreenLightPin:   23,
+		RedLightPin:     24,
+		CallSignalChan:  make(chan bool, 1),
+		DoorReleaseChan: make(chan bool, 1),
+		doorMutex:       &sync.Mutex{},
 	}
 	err := rpio.Open()
 	if err != nil {
@@ -53,6 +62,10 @@ func (g *GPIO) configure() {
 	g.pinCallSignal.Input()
 	g.pinCallSignal.Detect(rpio.FallEdge)
 
+	g.pinDoorFeedback = rpio.Pin(g.DoorFeedbackPin)
+	g.pinDoorFeedback.Input()
+	g.pinDoorFeedback.Detect(rpio.RiseEdge)
+
 	g.pinGreenLight = rpio.Pin(g.GreenLightPin)
 	g.pinGreenLight.Output()
 	g.pinGreenLight.PullDown()
@@ -71,12 +84,22 @@ func (g *GPIO) WatchInput() {
 			continue
 		}
 		if g.pinCallSignal.EdgeDetected() { // check if event occured
-			log.Info().Msgf("button pressed")
 			g.CallSignalChan <- true
 		}
 	}
 }
 
+func (g *GPIO) WatchDoorFeedback() {
+	for {
+		time.Sleep(time.Millisecond * 2000) // avoid noise
+		if !g.IsPresent {
+			continue
+		}
+		if g.pinDoorFeedback.EdgeDetected() { // check if event occured
+			g.DoorReleaseChan <- true
+		}
+	}
+}
 func (g *GPIO) BlinkGreen(dur time.Duration) {
 	if !g.IsPresent {
 		return
@@ -97,11 +120,15 @@ func (g *GPIO) RedLight(value bool) {
 	}
 }
 
-func (g *GPIO) ReleaseDoor(dur time.Duration) {
+func (g *GPIO) UnlockDoor(dur time.Duration) {
 	if !g.IsPresent {
 		return
 	}
+	g.doorMutex.Lock()
+	defer g.doorMutex.Unlock()
+	g.DoorUnlocked = true
 	g.pinDoorRelease.High()
 	time.Sleep(dur)
 	g.pinDoorRelease.Low()
+	g.DoorUnlocked = false
 }
