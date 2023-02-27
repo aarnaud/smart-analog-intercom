@@ -1,11 +1,13 @@
 package main
 
 import (
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"os"
 	"smart-analog-intercom/baresip"
 	"smart-analog-intercom/gpiowrapper"
+	mqtt_client "smart-analog-intercom/mqtt-client"
+	"smart-analog-intercom/utils"
 	"sync"
 	"time"
 )
@@ -15,6 +17,21 @@ type Call struct {
 	Active     bool
 	StartedAt  time.Time
 	BaresipCli *baresip.BaresipClient
+}
+
+type Intercom struct {
+	Call       *Call
+	MQTTClient *mqtt_client.Client
+	GPIO       *gpiowrapper.GPIO
+	Config     *utils.Config
+}
+
+func (i *Intercom) UnlockDoor() {
+	if i.Config.BareSIPEnabled {
+		go i.Call.BaresipCli.Play("portedoor.wav")
+	}
+	go i.GPIO.UnlockDoor(time.Second * 5)
+	log.Info().Msgf("unlocking door")
 }
 
 func (c *Call) Toggle(number string) error {
@@ -54,79 +71,100 @@ func (c *Call) Hangup() error {
 
 func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
-
-	baresipCli, err := baresip.NewBaresipCLient("intercom", 4444)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to establish connection to baresip")
+	config := utils.GetConfig()
+	intercom := &Intercom{
+		Config: config,
 	}
-	go baresipCli.ReadLoop()
-	call := Call{
-		mutex:      &sync.Mutex{},
-		Active:     false,
-		BaresipCli: baresipCli,
-	}
-	gpio := gpiowrapper.NewGPIO()
-	go gpio.WatchInput()
-	go gpio.WatchDoorFeedback()
 
-	phoneNumber := os.Getenv("PHONE_NUMBER")
-	if phoneNumber == "" {
-		log.Fatal().Msgf("Invalid phone number '%s'", phoneNumber)
-	}
-	log.Info().Msgf("%s will be call on signal", phoneNumber)
+	intercom.GPIO = gpiowrapper.NewGPIO()
+	go intercom.GPIO.WatchInput()
+	go intercom.GPIO.WatchDoorFeedback()
 
-	go func() {
-		for {
-			<-gpio.CallSignalChan
-			log.Info().Msgf("Signal detected")
-			call.Toggle(phoneNumber)
+	if config.BareSIPEnabled {
+		baresipCli, err := baresip.NewBaresipCLient(config.BareSIPHost, 4444)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to establish connection to baresip")
 		}
-	}()
-	go func() {
-		for {
-			resp := <-call.BaresipCli.ResponseChan
-			log.Info().Msgf("%v", resp)
+		go baresipCli.ReadLoop()
+		intercom.Call = &Call{
+			mutex:      &sync.Mutex{},
+			Active:     false,
+			BaresipCli: baresipCli,
 		}
-	}()
+		log.Info().Msgf("%s will be call on signal", config.PhoneNumber)
+
+		go func() {
+			for {
+				<-intercom.GPIO.CallSignalChan
+				log.Info().Msgf("Signal detected")
+				intercom.Call.Toggle(config.PhoneNumber)
+			}
+		}()
+		go func() {
+			for {
+				resp := <-intercom.Call.BaresipCli.ResponseChan
+				log.Info().Msgf("%v", resp)
+			}
+		}()
+		go func() {
+			for {
+				event := <-intercom.Call.BaresipCli.EventChan
+				switch event.Type {
+				case "CALL_LOCAL_SDP":
+					intercom.Call.Active = true
+					go intercom.GPIO.RedLight(true)
+				case "CALL_CLOSED":
+					intercom.Call.Active = false
+					go intercom.GPIO.RedLight(false)
+				case "CALL_DTMF_START":
+					log.Info().Msgf("button %s pressed", event.Param)
+					if event.Param == "5" {
+
+					}
+				}
+				log.Info().Msgf("%v", event)
+			}
+		}()
+	}
+
+	if config.MQTT.Enabled {
+		intercom.MQTTClient = mqtt_client.NewMQTT(config)
+		intercom.MQTTClient.WatchTopicUnlock(func(client mqtt.Client, message mqtt.Message) {
+			log.Info().Msgf("unlocking from MQTT")
+			intercom.UnlockDoor()
+		})
+	}
+
+	// Door Unlock feedback
 	go func() {
 		for {
-			<-gpio.DoorReleaseChan
-			if !call.Active {
+			<-intercom.GPIO.DoorReleaseChan
+			if config.BareSIPEnabled && !intercom.Call.Active {
 				log.Info().Msgf("door unlock without signal calling")
 				continue
 			}
 			// if the release come from this app
-			if gpio.DoorUnlocked {
+			if intercom.GPIO.DoorUnlocked {
 				log.Info().Msgf("door unlocked")
 				continue
 			}
 			log.Info().Msgf("door unlocked from physical button, cancelling the call")
-			call.Hangup()
-		}
-	}()
-	go func() {
-		for {
-			event := <-call.BaresipCli.EventChan
-			switch event.Type {
-			case "CALL_LOCAL_SDP":
-				call.Active = true
-				go gpio.RedLight(true)
-			case "CALL_CLOSED":
-				call.Active = false
-				go gpio.RedLight(false)
-			case "CALL_DTMF_START":
-				log.Info().Msgf("button %s pressed", event.Param)
-				if event.Param == "5" {
-					go call.BaresipCli.Play("portedoor.wav")
-					go gpio.UnlockDoor(time.Second * 5)
-					go log.Info().Msgf("unlocking door")
-				}
+			if config.BareSIPEnabled {
+				intercom.Call.Hangup()
 			}
-			log.Info().Msgf("%v", event)
+
 		}
 	}()
+
 	for {
-		<-baresipCli.PingChan
-		gpio.BlinkGreen(time.Second)
+		if config.BareSIPEnabled {
+			<-intercom.Call.BaresipCli.PingChan
+		} else {
+			time.Sleep(2 * time.Second)
+		}
+		if config.MQTT.Enabled {
+			intercom.MQTTClient.PublishAvailability()
+		}
+		intercom.GPIO.BlinkGreen(time.Second)
 	}
 }
