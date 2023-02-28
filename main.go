@@ -119,7 +119,7 @@ func main() {
 				case "CALL_DTMF_START":
 					log.Info().Msgf("button %s pressed", event.Param)
 					if event.Param == "5" {
-
+						intercom.UnlockDoor()
 					}
 				}
 				log.Info().Msgf("%v", event)
