@@ -19,21 +19,6 @@ type Call struct {
 	BaresipCli *baresip.BaresipClient
 }
 
-type Intercom struct {
-	Call       *Call
-	MQTTClient *mqtt_client.Client
-	GPIO       *gpiowrapper.GPIO
-	Config     *utils.Config
-}
-
-func (i *Intercom) UnlockDoor() {
-	if i.Config.BareSIPEnabled {
-		go i.Call.BaresipCli.Play("portedoor.wav")
-	}
-	go i.GPIO.UnlockDoor(time.Second * 5)
-	log.Info().Msgf("unlocking door")
-}
-
 func (c *Call) Toggle(number string) error {
 	if c.Active && c.StartedAt.Before(time.Now().Add(-time.Second*5)) {
 		return c.Hangup()
@@ -67,6 +52,21 @@ func (c *Call) Hangup() error {
 	}
 	c.Active = false
 	return nil
+}
+
+type Intercom struct {
+	Call       *Call
+	MQTTClient *mqtt_client.Client
+	GPIO       *gpiowrapper.GPIO
+	Config     *utils.Config
+}
+
+func (i *Intercom) UnlockDoor() {
+	if i.Config.BareSIPEnabled {
+		go i.Call.BaresipCli.Play("portedoor.wav")
+	}
+	go i.GPIO.UnlockDoor(time.Second * 5)
+	log.Info().Msgf("unlocking door")
 }
 
 func main() {
