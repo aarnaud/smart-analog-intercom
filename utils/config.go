@@ -32,7 +32,7 @@ func GetConfig() *Config {
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
 	viper.ReadInConfig()
-	viper.SetDefault("PORT", 8080)
+	viper.SetDefault("HTTP_PORT", 8080)
 	viper.SetDefault("BARESIP_ENABLED", true)
 	viper.SetDefault("BARESIP_HOST", "localhost")
 	viper.SetDefault("MQTT_ENABLED", false)
