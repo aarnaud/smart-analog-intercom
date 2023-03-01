@@ -3,6 +3,7 @@ package mqtt_client
 import (
 	"fmt"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/rs/zerolog/log"
 	"path"
 	"smart-analog-intercom/utils"
 	"time"
@@ -13,6 +14,7 @@ type Client struct {
 	instance          mqtt.Client
 	topicUnlock       string
 	topicAvailability string
+	topicCall         string
 }
 
 func NewMQTT(config *utils.Config) *Client {
@@ -22,14 +24,11 @@ func NewMQTT(config *utils.Config) *Client {
 	opts.SetUsername(config.MQTT.Username)
 	opts.SetPassword(config.MQTT.Password)
 
-	opts.SetDefaultPublishHandler(func(client mqtt.Client, msg mqtt.Message) {
-		fmt.Printf("Received message: %s from topic: %s\n", msg.Payload(), msg.Topic())
-	})
 	opts.OnConnect = func(client mqtt.Client) {
-		fmt.Println("MQTT Connected")
+		log.Info().Msg("MQTT Connected")
 	}
 	opts.OnConnectionLost = func(client mqtt.Client, err error) {
-		fmt.Printf("MQTT broker connection lost: %v", err)
+		log.Err(err).Msgf("MQTT broker connection lost")
 	}
 
 	opts.ConnectRetryInterval = 5 * time.Second
@@ -44,16 +43,43 @@ func NewMQTT(config *utils.Config) *Client {
 		instance:          client,
 		topicUnlock:       path.Join(config.MQTT.BaseTopic, "unlock"),
 		topicAvailability: path.Join(config.MQTT.BaseTopic, "available"),
+		topicCall:         path.Join(config.MQTT.BaseTopic, "call"),
 	}
 }
 
 func (c *Client) WatchTopicUnlock(callback mqtt.MessageHandler) {
+	// https://www.home-assistant.io/integrations/button.mqtt/
 	token := c.instance.Subscribe(c.topicUnlock, 1, callback)
-	token.Wait()
-	fmt.Printf("Subscribed to topic: %s", c.topicUnlock)
+	token.WaitTimeout(5 * time.Second)
+	if !token.WaitTimeout(2 * time.Second) {
+		log.Warn().Msgf("timeout to subscribe unlock to topic %s", c.topicUnlock)
+	}
+	if token.Error() != nil {
+		log.Error().Err(token.Error()).Msgf("failed to subscribe unlock to topic %s", c.topicUnlock)
+	}
+	log.Info().Msgf("Subscribed to topic: %s", c.topicUnlock)
 }
 
 func (c *Client) PublishAvailability() {
+	// https://www.home-assistant.io/integrations/button.mqtt/
+	log.Debug().Msgf("PublishAvailability to topic: %s", c.topicAvailability)
 	token := c.instance.Publish(c.topicAvailability, 0, false, "online")
-	token.Wait()
+	if !token.WaitTimeout(2 * time.Second) {
+		log.Warn().Msgf("timeout to publish availability to topic %s", c.topicAvailability)
+	}
+	if token.Error() != nil {
+		log.Error().Err(token.Error()).Msgf("failed to publish availability to topic %s", c.topicAvailability)
+	}
+}
+
+func (c *Client) PublishCall() {
+	// https://www.home-assistant.io/integrations/binary_sensor.mqtt/
+	log.Debug().Msgf("PublishCall to topic: %s", c.topicCall)
+	token := c.instance.Publish(c.topicCall, 0, false, "ON")
+	if !token.WaitTimeout(2 * time.Second) {
+		log.Warn().Msgf("timeout to publish call to topic %s", c.topicCall)
+	}
+	if token.Error() != nil {
+		log.Error().Err(token.Error()).Msgf("failed to publish call to topic %s", c.topicCall)
+	}
 }

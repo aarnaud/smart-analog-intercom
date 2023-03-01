@@ -14,16 +14,16 @@ import (
 
 type Call struct {
 	mutex      *sync.Mutex
-	Active     bool
+	active     bool
 	StartedAt  time.Time
 	BaresipCli *baresip.BaresipClient
 }
 
 func (c *Call) Toggle(number string) error {
-	if c.Active && c.StartedAt.Before(time.Now().Add(-time.Second*5)) {
+	if c.active && c.StartedAt.Before(time.Now().Add(-time.Second*5)) {
 		return c.Hangup()
 	}
-	if !c.Active {
+	if !c.active {
 		return c.Dial(number)
 	}
 	return nil
@@ -37,7 +37,7 @@ func (c *Call) Dial(number string) error {
 		c.BaresipCli.Play("error.wav")
 		return err
 	}
-	c.Active = true
+	c.active = true
 	c.StartedAt = time.Now()
 	c.BaresipCli.Play("ringback.wav")
 	return nil
@@ -50,8 +50,18 @@ func (c *Call) Hangup() error {
 	if err := c.BaresipCli.Hangup(); err != nil {
 		return err
 	}
-	c.Active = false
+	c.active = false
 	return nil
+}
+
+func (c *Call) SetActive(value bool) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.active = value
+}
+
+func (c *Call) IsActive() bool {
+	return c.active
 }
 
 type Intercom struct {
@@ -81,6 +91,8 @@ func main() {
 	go intercom.GPIO.WatchDoorFeedback()
 
 	if config.BareSIPEnabled {
+		log.Info().Msgf("%s will be call on signal", config.PhoneNumber)
+
 		baresipCli, err := baresip.NewBaresipCLient(config.BareSIPHost, 4444)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to establish connection to baresip")
@@ -88,22 +100,13 @@ func main() {
 		go baresipCli.ReadLoop()
 		intercom.Call = &Call{
 			mutex:      &sync.Mutex{},
-			Active:     false,
 			BaresipCli: baresipCli,
 		}
-		log.Info().Msgf("%s will be call on signal", config.PhoneNumber)
 
 		go func() {
 			for {
-				<-intercom.GPIO.CallSignalChan
-				log.Info().Msgf("Signal detected")
-				intercom.Call.Toggle(config.PhoneNumber)
-			}
-		}()
-		go func() {
-			for {
 				resp := <-intercom.Call.BaresipCli.ResponseChan
-				log.Info().Msgf("%v", resp)
+				log.Debug().Msgf("%v", resp)
 			}
 		}()
 		go func() {
@@ -111,10 +114,10 @@ func main() {
 				event := <-intercom.Call.BaresipCli.EventChan
 				switch event.Type {
 				case "CALL_LOCAL_SDP":
-					intercom.Call.Active = true
+					intercom.Call.SetActive(true)
 					go intercom.GPIO.RedLight(true)
 				case "CALL_CLOSED":
-					intercom.Call.Active = false
+					intercom.Call.SetActive(false)
 					go intercom.GPIO.RedLight(false)
 				case "CALL_DTMF_START":
 					log.Info().Msgf("button %s pressed", event.Param)
@@ -122,7 +125,7 @@ func main() {
 						intercom.UnlockDoor()
 					}
 				}
-				log.Info().Msgf("%v", event)
+				log.Debug().Msgf("%v", event)
 			}
 		}()
 	}
@@ -135,11 +138,25 @@ func main() {
 		})
 	}
 
+	go func() {
+		// CallSignal loop
+		for {
+			<-intercom.GPIO.CallSignalChan
+			log.Info().Msgf("Signal detected")
+			if config.BareSIPEnabled {
+				intercom.Call.Toggle(config.PhoneNumber)
+			}
+			if config.MQTT.Enabled {
+				intercom.MQTTClient.PublishCall()
+			}
+		}
+	}()
+
 	// Door Unlock feedback
 	go func() {
 		for {
 			<-intercom.GPIO.DoorReleaseChan
-			if config.BareSIPEnabled && !intercom.Call.Active {
+			if config.BareSIPEnabled && !intercom.Call.IsActive() {
 				log.Info().Msgf("door unlock without signal calling")
 				continue
 			}
