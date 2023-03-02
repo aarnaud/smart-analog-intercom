@@ -132,7 +132,7 @@ func main() {
 
 	if config.MQTT.Enabled {
 		intercom.MQTTClient = mqtt_client.NewMQTT(config)
-		intercom.MQTTClient.WatchTopicUnlock(func(client mqtt.Client, message mqtt.Message) {
+		go intercom.MQTTClient.WatchTopicUnlock(func(client mqtt.Client, message mqtt.Message) {
 			log.Info().Msgf("unlocking from MQTT")
 			if intercom.Call.IsActive() {
 				log.Info().Msgf("hangup sip call because handle by MQTT")

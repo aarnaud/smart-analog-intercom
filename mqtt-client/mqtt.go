@@ -10,11 +10,12 @@ import (
 )
 
 type Client struct {
-	config            *utils.ConfigMQTT
-	instance          mqtt.Client
-	topicUnlock       string
-	topicAvailability string
-	topicCall         string
+	config                    *utils.ConfigMQTT
+	instance                  mqtt.Client
+	topicUnlock               string
+	topicAvailability         string
+	topicCall                 string
+	onConnectWatchTopicUnlock chan bool
 }
 
 func NewMQTT(config *utils.Config) *Client {
@@ -24,8 +25,10 @@ func NewMQTT(config *utils.Config) *Client {
 	opts.SetUsername(config.MQTT.Username)
 	opts.SetPassword(config.MQTT.Password)
 
+	onConnectWatchTopicUnlock := make(chan bool, 1)
 	opts.OnConnect = func(client mqtt.Client) {
 		log.Info().Msg("MQTT Connected")
+		onConnectWatchTopicUnlock <- true
 	}
 	opts.OnConnectionLost = func(client mqtt.Client, err error) {
 		log.Err(err).Msgf("MQTT broker connection lost")
@@ -39,25 +42,30 @@ func NewMQTT(config *utils.Config) *Client {
 	}
 
 	return &Client{
-		config:            config.MQTT,
-		instance:          client,
-		topicUnlock:       path.Join(config.MQTT.BaseTopic, "unlock"),
-		topicAvailability: path.Join(config.MQTT.BaseTopic, "available"),
-		topicCall:         path.Join(config.MQTT.BaseTopic, "call"),
+		config:                    config.MQTT,
+		instance:                  client,
+		topicUnlock:               path.Join(config.MQTT.BaseTopic, "unlock"),
+		topicAvailability:         path.Join(config.MQTT.BaseTopic, "available"),
+		topicCall:                 path.Join(config.MQTT.BaseTopic, "call"),
+		onConnectWatchTopicUnlock: onConnectWatchTopicUnlock,
 	}
 }
 
 func (c *Client) WatchTopicUnlock(callback mqtt.MessageHandler) {
-	// https://www.home-assistant.io/integrations/button.mqtt/
-	token := c.instance.Subscribe(c.topicUnlock, 1, callback)
-	token.WaitTimeout(5 * time.Second)
-	if !token.WaitTimeout(2 * time.Second) {
-		log.Warn().Msgf("timeout to subscribe unlock to topic %s", c.topicUnlock)
+	for {
+		// wait for connection
+		<-c.onConnectWatchTopicUnlock
+		// https://www.home-assistant.io/integrations/button.mqtt/
+		token := c.instance.Subscribe(c.topicUnlock, 1, callback)
+		token.WaitTimeout(5 * time.Second)
+		if !token.WaitTimeout(2 * time.Second) {
+			log.Warn().Msgf("timeout to subscribe unlock to topic %s", c.topicUnlock)
+		}
+		if token.Error() != nil {
+			log.Error().Err(token.Error()).Msgf("failed to subscribe unlock to topic %s", c.topicUnlock)
+		}
+		log.Info().Msgf("Subscribed to topic: %s", c.topicUnlock)
 	}
-	if token.Error() != nil {
-		log.Error().Err(token.Error()).Msgf("failed to subscribe unlock to topic %s", c.topicUnlock)
-	}
-	log.Info().Msgf("Subscribed to topic: %s", c.topicUnlock)
 }
 
 func (c *Client) PublishAvailability() {
