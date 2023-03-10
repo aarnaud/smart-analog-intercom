@@ -73,7 +73,7 @@ type Intercom struct {
 
 func (i *Intercom) UnlockDoor() {
 	if i.Config.BareSIPEnabled {
-		go i.Call.BaresipCli.Play("unlockdoor.wav")
+		i.Call.BaresipCli.Play("unlockdoor.wav")
 	}
 	go i.GPIO.UnlockDoor(time.Second * 5)
 	log.Info().Msgf("unlocking door")
