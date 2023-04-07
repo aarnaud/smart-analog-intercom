@@ -60,11 +60,12 @@ func (g *GPIO) configure() {
 
 	g.pinCallSignal = rpio.Pin(g.CallSignalPin)
 	g.pinCallSignal.Input()
+	g.pinCallSignal.PullUp()
 	g.pinCallSignal.Detect(rpio.FallEdge)
 
 	g.pinDoorFeedback = rpio.Pin(g.DoorFeedbackPin)
 	g.pinDoorFeedback.Input()
-	g.pinDoorFeedback.Detect(rpio.RiseEdge)
+	g.pinDoorFeedback.Detect(rpio.FallEdge)
 
 	g.pinGreenLight = rpio.Pin(g.GreenLightPin)
 	g.pinGreenLight.Output()
@@ -84,7 +85,9 @@ func (g *GPIO) WatchInput() {
 			continue
 		}
 		if g.pinCallSignal.EdgeDetected() { // check if event occured
+			//if g.pinCallSignal.Read() == rpio.Low {
 			g.CallSignalChan <- true
+			//}
 		}
 	}
 }
@@ -96,7 +99,9 @@ func (g *GPIO) WatchDoorFeedback() {
 			continue
 		}
 		if g.pinDoorFeedback.EdgeDetected() { // check if event occured
+			//if g.pinDoorFeedback.Read() == rpio.Low {
 			g.DoorReleaseChan <- true
+			//}
 		}
 	}
 }
