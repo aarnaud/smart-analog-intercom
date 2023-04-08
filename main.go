@@ -79,6 +79,10 @@ func (i *Intercom) UnlockDoor() {
 	log.Info().Msgf("unlocking door")
 }
 
+func (c *Call) Play(filename string) error {
+	return c.BaresipCli.Play(filename)
+}
+
 func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	config := utils.GetConfig()
@@ -139,6 +143,13 @@ func main() {
 				intercom.Call.Hangup()
 			}
 			intercom.UnlockDoor()
+		})
+
+		go intercom.MQTTClient.WatchTopicSound(func(client mqtt.Client, message mqtt.Message) {
+			log.Info().Msgf("play %s", message.Payload())
+			if err := intercom.Call.Play(string(message.Payload())); err != nil {
+				log.Error().Err(err).Msgf("failed to play %s", message.Payload())
+			}
 		})
 	}
 
