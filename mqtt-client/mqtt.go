@@ -65,10 +65,10 @@ func (c *Client) WatchTopicUnlock(callback mqtt.MessageHandler) {
 		token := c.instance.Subscribe(c.topicUnlock, 1, callback)
 		token.WaitTimeout(5 * time.Second)
 		if !token.WaitTimeout(2 * time.Second) {
-			log.Warn().Msgf("timeout to subscribe unlock to topic %s", c.topicUnlock)
+			log.Warn().Msgf("timeout to subscribe to topic %s", c.topicUnlock)
 		}
 		if token.Error() != nil {
-			log.Error().Err(token.Error()).Msgf("failed to subscribe unlock to topic %s", c.topicUnlock)
+			log.Error().Err(token.Error()).Msgf("failed to subscribe to topic %s", c.topicUnlock)
 		}
 		log.Info().Msgf("Subscribed to topic: %s", c.topicUnlock)
 	}
@@ -82,10 +82,10 @@ func (c *Client) WatchTopicSound(callback mqtt.MessageHandler) {
 		token := c.instance.Subscribe(c.topicSound, 1, callback)
 		token.WaitTimeout(5 * time.Second)
 		if !token.WaitTimeout(2 * time.Second) {
-			log.Warn().Msgf("timeout to subscribe unlock to topic %s", c.topicSound)
+			log.Warn().Msgf("timeout to subscribe to topic %s", c.topicSound)
 		}
 		if token.Error() != nil {
-			log.Error().Err(token.Error()).Msgf("failed to subscribe unlock to topic %s", c.topicSound)
+			log.Error().Err(token.Error()).Msgf("failed to subscribe to topic %s", c.topicSound)
 		}
 		log.Info().Msgf("Subscribed to topic: %s", c.topicSound)
 	}
