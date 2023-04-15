@@ -145,12 +145,18 @@ func main() {
 			intercom.UnlockDoor()
 		})
 
-		go intercom.MQTTClient.WatchTopicSound(func(client mqtt.Client, message mqtt.Message) {
-			log.Info().Msgf("play %s", message.Payload())
-			if err := intercom.Call.Play(string(message.Payload())); err != nil {
-				log.Error().Err(err).Msgf("failed to play %s", message.Payload())
-			}
-		})
+		if config.BareSIPEnabled {
+			go intercom.MQTTClient.WatchTopicSound(func(client mqtt.Client, message mqtt.Message) {
+				log.Info().Msgf("play %s", message.Payload())
+				if err := intercom.Call.Play(string(message.Payload())); err != nil {
+					log.Error().Err(err).Msgf("failed to play %s", message.Payload())
+				}
+			})
+
+			go intercom.MQTTClient.WatchCallAction(func(client mqtt.Client, message mqtt.Message) {
+				intercom.Call.Toggle(config.PhoneNumber)
+			})
+		}
 	}
 
 	go func() {

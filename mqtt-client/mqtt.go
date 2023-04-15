@@ -16,8 +16,10 @@ type Client struct {
 	topicSound                string
 	topicAvailability         string
 	topicCall                 string
+	topicCallAction           string
 	onConnectWatchTopicUnlock chan bool
 	onConnectWatchTopicSound  chan bool
+	onConnectWatchCallAction  chan bool
 }
 
 func NewMQTT(config *utils.Config) *Client {
@@ -29,10 +31,12 @@ func NewMQTT(config *utils.Config) *Client {
 
 	onConnectWatchTopicUnlock := make(chan bool, 1)
 	onConnectWatchTopicSound := make(chan bool, 1)
+	onConnectWatchCallAction := make(chan bool, 1)
 	opts.OnConnect = func(client mqtt.Client) {
 		log.Info().Msg("MQTT Connected")
 		onConnectWatchTopicUnlock <- true
 		onConnectWatchTopicSound <- true
+		onConnectWatchCallAction <- true
 	}
 	opts.OnConnectionLost = func(client mqtt.Client, err error) {
 		log.Err(err).Msgf("MQTT broker connection lost")
@@ -52,8 +56,10 @@ func NewMQTT(config *utils.Config) *Client {
 		topicSound:                path.Join(config.MQTT.BaseTopic, "sound"),
 		topicAvailability:         path.Join(config.MQTT.BaseTopic, "available"),
 		topicCall:                 path.Join(config.MQTT.BaseTopic, "call"),
+		topicCallAction:           path.Join(config.MQTT.BaseTopic, "callAction"),
 		onConnectWatchTopicUnlock: onConnectWatchTopicUnlock,
 		onConnectWatchTopicSound:  onConnectWatchTopicSound,
+		onConnectWatchCallAction:  onConnectWatchCallAction,
 	}
 }
 
@@ -88,6 +94,23 @@ func (c *Client) WatchTopicSound(callback mqtt.MessageHandler) {
 			log.Error().Err(token.Error()).Msgf("failed to subscribe to topic %s", c.topicSound)
 		}
 		log.Info().Msgf("Subscribed to topic: %s", c.topicSound)
+	}
+}
+
+func (c *Client) WatchCallAction(callback mqtt.MessageHandler) {
+	for {
+		// wait for connection
+		<-c.onConnectWatchCallAction
+		// https://www.home-assistant.io/integrations/button.mqtt/
+		token := c.instance.Subscribe(c.topicCallAction, 1, callback)
+		token.WaitTimeout(5 * time.Second)
+		if !token.WaitTimeout(2 * time.Second) {
+			log.Warn().Msgf("timeout to subscribe to topic %s", c.topicCallAction)
+		}
+		if token.Error() != nil {
+			log.Error().Err(token.Error()).Msgf("failed to subscribe to topic %s", c.topicCallAction)
+		}
+		log.Info().Msgf("Subscribed to topic: %s", c.topicCallAction)
 	}
 }
 
